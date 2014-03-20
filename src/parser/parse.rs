@@ -18,6 +18,12 @@ pub enum FeOExpr {
     BoolLiteral(bool),
     /// Identifier (e.g. `foo`)
     Identifier(~str),
+    /// Function call (e.g. `f(x)`)
+    Call(~FeOExpr, ~FeOExpr),
+    /// Subscription (e.g. `list[0]`)
+    Index(~FeOExpr, ~FeOExpr),
+    /// Property lookup (e.g. `x.y`)
+    Lookup(~FeOExpr, ~str),
     /// Binary operation (e.g. `1 + 2`)
     BinOp(~str, ~FeOExpr, ~FeOExpr),
     /// Unary operation (e.g. `-1`)
@@ -157,22 +163,43 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
                 block(str, pos)
             },
             // Conditional
-            'i' if pos + 1 < str.len() && str[pos + 1] as char == 'f' => {
-                // "if" <expr> <block> "else" <block>
+            'i' if pos + 2 < str.len() && str[pos + 1] as char == 'f'
+                            && (str[pos + 2] as char).is_whitespace() => {
+                // "if" <expr> <expr> "else" <expr>
                 pos += 2; // Skip `if`
                 pos = any_whitespace(str, pos);
                 let cond = run_parser!(str, pos, expr);
                 pos = any_whitespace(str, pos);
-                let yes = run_parser!(str, pos, block);
+                let yes = run_parser!(str, pos, expr);
+                match yes {
+                    Block(_) | Conditional(..) => {},
+                    _ => return Err((pos,
+                                     ~"`if` should be followed by a block"))
+                }
                 pos = any_whitespace(str, pos);
-                try!(expect_str(str, pos, "else", Nothing));
-                pos += 4; // Skip `else`
-                pos = any_whitespace(str, pos);
-                let no = run_parser!(str, pos, block);
-                Ok((Conditional(~cond, ~yes, ~no), pos))
+                let success = expect_str(str, pos, "else", Nothing);
+                match success {
+                    Ok(_) => { // Else-condition exists
+                        pos += 4; // Skip `else`
+                        pos = any_whitespace(str, pos);
+                        let no = run_parser!(str, pos, expr);
+                        match no {
+                            Block(_) | Conditional(..) => {},
+                            _ =>
+                                return Err((pos,
+                                    ~"`else` should be followed by a block"))
+                        }
+                        Ok((Conditional(~cond, ~yes, ~no), pos))
+                    },
+                    Err(_) => { // No else-condition
+                        Ok((Conditional(~cond, ~yes, ~TupleLiteral(vec!())),
+                            pos))
+                    },
+                }
             },
             // Identifier or Boolean literal
-            'a'..'z' | 'A'..'Z' | '_' => {
+            // (extra `'i'` is a workaround for mozilla/rust#13027)
+            'i' | 'a'..'z' | 'A'..'Z' | '_' => {
                 let mut buf = format!("{}", str[pos] as char);
                 pos += 1;
                 while pos < str.len() && (str[pos] as char).is_alphanumeric() {
@@ -225,8 +252,8 @@ mod test {
 
     #[test]
     fn parse_identifier() {
-        assert_eq!(parse("hello; world"),
-                  Ok(Block(vec!(Identifier(~"hello"), Identifier(~"world")))));
+        assert_eq!(parse("ifhello; world"),
+                  Ok(Block(vec!(Identifier(~"ifhello"), Identifier(~"world")))));
     }
 
     #[test]
@@ -237,9 +264,37 @@ mod test {
     }
 
     #[test]
+    fn parse_if() {
+        assert_eq!(parse("if 1 { 2 }"),
+                   Ok(Block(vec!(Conditional(~NumLiteral(1.0,), ~Block(vec!(
+                        NumLiteral(2.0))), ~TupleLiteral(vec!()))))));
+    }
+
+    #[test]
     fn parse_if_else() {
         assert_eq!(parse("if 1 { 2 } else { 3 }"),
                    Ok(Block(vec!(Conditional(~NumLiteral(1.0), ~Block(vec!(
                         NumLiteral(2.0))), ~Block(vec!(NumLiteral(3.0))))))));
+    }
+
+    #[test]
+    fn parse_if_else_if_else() {
+        assert_eq!(parse("if 1 { 2 } else if 2 { 3 } else { 4 }"),
+                   Ok(Block(vec!(Conditional(~NumLiteral(1.0), ~Block(vec!(
+                        NumLiteral(2.0))), ~Conditional(~NumLiteral(2.0),
+                            ~Block(vec!(NumLiteral(3.0))),
+                            ~Block(vec!(NumLiteral(4.0)))))))));
+    }
+
+    #[test]
+    fn parse_if_expr() {
+        assert_eq!(parse("if 1 2 else 3"),
+                   Err(~"pos 6: `if` should be followed by a block"));
+    }
+
+    #[test]
+    fn parse_if_else_expr() {
+        assert_eq!(parse("if 1 { 2 } else 3"),
+                   Err(~"pos 17: `else` should be followed by a block"));
     }
 }
