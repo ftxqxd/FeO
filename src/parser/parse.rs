@@ -2,8 +2,6 @@
 This module contains utilities for parsing FeO source code.
 */
 
-use std::vec_ng::Vec;
-
 #[deriving(Eq, Show)]
 pub enum FeOExpr {
     /// String literal (e.g. `"hello world"`)
@@ -18,8 +16,8 @@ pub enum FeOExpr {
     BoolLiteral(bool),
     /// Identifier (e.g. `foo`)
     Identifier(~str),
-    /// Function call (e.g. `f(x)`)
-    Call(~FeOExpr, ~FeOExpr),
+    /// Function call (e.g. `f(x, y, z)`)
+    Call(~FeOExpr, Vec<FeOExpr>),
     /// Subscription (e.g. `list[0]`)
     Index(~FeOExpr, ~FeOExpr),
     /// Property lookup (e.g. `x.y`)
@@ -138,7 +136,7 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
 
     fn block(str: &str, mut pos: uint) -> ParserResult {
         try!(expect(str, pos, '{', Nothing));
-        pos += 1;
+        pos += 1; // Skip `{`
         pos = any_whitespace(str, pos);
         let s = run_parser!(str, pos, stmts);
         pos = any_whitespace(str, pos);
@@ -147,6 +145,12 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
 
     fn expr(str: &str, mut pos: uint) -> ParserResult {
         match str[pos] as char {
+            // Parenthesised expression
+            '(' => {
+                pos += 1; // Skip `(`
+                let inner = run_parser!(str, pos, expr);
+                expect(str, pos, ')', inner)
+            },
             // Number literal
             '0'..'9' => {
                 let mut buf = ~"";
@@ -159,23 +163,18 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
             },
             // Block expression
             '{' => {
-                // "{" (<stmt>);* "}"
+                // "{" (<stmt>);* ";"? "}"
                 block(str, pos)
             },
             // Conditional
             'i' if pos + 2 < str.len() && str[pos + 1] as char == 'f'
                             && (str[pos + 2] as char).is_whitespace() => {
-                // "if" <expr> <expr> "else" <expr>
+                // "if" <expr> <block> "else" (<block>|<conditional>)
                 pos += 2; // Skip `if`
                 pos = any_whitespace(str, pos);
                 let cond = run_parser!(str, pos, expr);
                 pos = any_whitespace(str, pos);
-                let yes = run_parser!(str, pos, expr);
-                match yes {
-                    Block(_) | Conditional(..) => {},
-                    _ => return Err((pos,
-                                     ~"`if` should be followed by a block"))
-                }
+                let yes = run_parser!(str, pos, block);
                 pos = any_whitespace(str, pos);
                 let success = expect_str(str, pos, "else", Nothing);
                 match success {
@@ -187,7 +186,7 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
                             Block(_) | Conditional(..) => {},
                             _ =>
                                 return Err((pos,
-                                    ~"`else` should be followed by a block"))
+                                    ~"`else` should be followed by `if` or a block"))
                         }
                         Ok((Conditional(~cond, ~yes, ~no), pos))
                     },
@@ -253,7 +252,8 @@ mod test {
     #[test]
     fn parse_identifier() {
         assert_eq!(parse("ifhello; world"),
-                  Ok(Block(vec!(Identifier(~"ifhello"), Identifier(~"world")))));
+                  Ok(Block(vec!(Identifier(~"ifhello"),
+                                Identifier(~"world")))));
     }
 
     #[test]
@@ -287,14 +287,14 @@ mod test {
     }
 
     #[test]
-    fn parse_if_expr() {
-        assert_eq!(parse("if 1 2 else 3"),
-                   Err(~"pos 6: `if` should be followed by a block"));
+    fn parse_if_else_expr() {
+        assert_eq!(parse("if 1 { 2 } else 3"),
+            Err(~"pos 17: `else` should be followed by `if` or a block"));
     }
 
     #[test]
-    fn parse_if_else_expr() {
-        assert_eq!(parse("if 1 { 2 } else 3"),
-                   Err(~"pos 17: `else` should be followed by a block"));
+    fn parse_paren_expr() {
+        assert_eq!(parse("(((3))); (4); ((5)); 6; ((7));"),
+                   parse("3; 4; 5; 6; 7;"));
     }
 }
