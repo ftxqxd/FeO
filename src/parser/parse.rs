@@ -8,9 +8,9 @@ pub enum FeOExpr {
     StrLiteral(~str),
     /// Number literal (e.g. `42`)
     NumLiteral(f64),
-    /// List literal (e.g. `[1, 2, "three"]`)
+    /// List literal (e.g. `[1, two, "three"]`)
     ListLiteral(Vec<FeOExpr>),
-    /// Tuple literal (e.g. `(1, 2, "three")`)
+    /// Tuple literal (e.g. `(1, two, "three")`)
     TupleLiteral(Vec<FeOExpr>),
     /// Boolean literal (e.g. `true`)
     BoolLiteral(bool),
@@ -32,11 +32,11 @@ pub enum FeOExpr {
     Assign(~str, ~FeOExpr), // TODO: patterns
     /// Conditional (e.g. `if cond { 1 } else { 2 }`)
     Conditional(~FeOExpr, ~FeOExpr, ~FeOExpr),
-    /// For-loop (e.g. `for i in [1,2,3].iter() {}`)
+    /// For-loop (e.g. `for i in [1, 2, 3].iter() {}`)
     ForLoop(~str, ~FeOExpr, Vec<FeOExpr>), // TODO: patterns
     /// While-loop (e.g. `while true {}`)
     WhileLoop(~FeOExpr, Vec<FeOExpr>),
-    /// Function declaration (e.g. `fn func(x) { x * 2 }`)
+    /// Function declaration (e.g. `fn f(x) { x * 2 }`)
     FnDecl(~str, Vec<~str>, Vec<FeOExpr>), // TODO: patterns
     /// Class declaration (e.g. `class Cow: Animal + Object {}`)
     ClassDecl(~str, Vec<~FeOExpr>, Vec<FeOExpr>),
@@ -144,6 +144,31 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
     }
 
     fn expr(str: &str, mut pos: uint) -> ParserResult {
+        // TODO: allow `f(x)(y)`
+        let e = run_parser!(str, pos, base);
+        pos = any_whitespace(str, pos);
+        if pos < str.len() && str[pos] as char == '(' {
+            let mut v = vec!();
+            loop {
+                pos += 1; // Skip `(`
+                pos = any_whitespace(str, pos);
+                if pos < str.len() && str[pos] as char == ')' {
+                    // Empty parameter list
+                    break;
+                }
+                v.push(run_parser!(str, pos, expr));
+                pos = any_whitespace(str, pos);
+                if pos < str.len() && str[pos] as char != ',' {
+                    break;
+                }
+            }
+            expect(str, pos, ')', Call(~e, v))
+        } else {
+            Ok((e, pos))
+        }
+    }
+
+    fn base(str: &str, mut pos: uint) -> ParserResult {
         match str[pos] as char {
             // Parenthesised expression
             '(' => {
@@ -245,8 +270,9 @@ mod test {
     #[test]
     fn parse_whitespace() {
         assert_eq!(parse("  \n 1.2  ; \t  {  \r 3.4  ;  5.6  \n\n  } \r\n  "),
-                   Ok(Block(vec!(NumLiteral(1.2), Block(vec!(NumLiteral(3.4),
-                        NumLiteral(5.6)))))));
+                   parse("1.2;{3.4;5.6}"));
+        assert_eq!(parse(" \n f   (   3  \t , \r  5   );    hello ; world  "),
+                   parse("f(3,5);hello;world"));
     }
 
     #[test]
@@ -296,5 +322,14 @@ mod test {
     fn parse_paren_expr() {
         assert_eq!(parse("(((3))); (4); ((5)); 6; ((7));"),
                    parse("3; 4; 5; 6; 7;"));
+    }
+
+    #[test]
+    fn parse_fn_call() {
+        assert_eq!(parse("1.3 ( )"),
+                   Ok(Block(vec!(Call(~NumLiteral(1.3), vec!())))));
+        assert_eq!(parse("f ( 3 , 4 )"),
+                   Ok(Block(vec!(Call(~Identifier(~"f"),
+                        vec!(NumLiteral(3.0), NumLiteral(4.0)))))));
     }
 }

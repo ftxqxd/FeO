@@ -1,7 +1,7 @@
-#[crate_id = "feo"];
-#[crate_type = "lib"];
+#![crate_id = "feo"]
+#![crate_type = "lib"]
 
-#[feature(globs, macro_rules)];
+#![feature(globs, macro_rules)]
 
 /*!
 FeO — a fast scripting language for Rust

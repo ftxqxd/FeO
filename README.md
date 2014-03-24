@@ -18,12 +18,13 @@ Things being worked on:
 
 Things still remaining:
 
+* `feo!(…)` macro
 * Everything else
 
 Examples
 --------
 
-```
+```rust
 let list = ["hello", 2, "dynamically-typed", 3.4, "world"];
 
 fn concat(list) {
