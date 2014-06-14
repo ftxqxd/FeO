@@ -2,10 +2,10 @@
 This module contains utilities for parsing FeO source code.
 */
 
-#[deriving(Eq, Show)]
+#[deriving(PartialEq, Show)]
 pub enum FeOExpr {
     /// String literal (e.g. `"hello world"`)
-    StrLiteral(~str),
+    StrLiteral(String),
     /// Number literal (e.g. `42`)
     NumLiteral(f64),
     /// List literal (e.g. `[1, two, "three"]`)
@@ -15,38 +15,38 @@ pub enum FeOExpr {
     /// Boolean literal (e.g. `true`)
     BoolLiteral(bool),
     /// Identifier (e.g. `foo`)
-    Identifier(~str),
+    Identifier(String),
     /// Function call (e.g. `f(x, y, z)`)
-    Call(~FeOExpr, Vec<FeOExpr>),
+    Call(Box<FeOExpr>, Vec<FeOExpr>),
     /// Subscription (e.g. `list[0]`)
-    Index(~FeOExpr, ~FeOExpr),
+    Index(Box<FeOExpr>, Box<FeOExpr>),
     /// Property lookup (e.g. `x.y`)
-    Lookup(~FeOExpr, ~str),
+    Lookup(Box<FeOExpr>, String),
     /// Binary operation (e.g. `1 + 2`)
-    BinOp(~str, ~FeOExpr, ~FeOExpr),
+    BinOp(String, Box<FeOExpr>, Box<FeOExpr>),
     /// Unary operation (e.g. `-1`)
-    UnrOp(~str, ~FeOExpr),
+    UnrOp(String, Box<FeOExpr>),
     /// Variable declaration (e.g. `let x = 1`)
-    Declare(~str, ~FeOExpr), // TODO: patterns
+    Declare(String, Box<FeOExpr>), // TODO: patterns
     /// Variable assignment (e.g. `x = 2`)
-    Assign(~str, ~FeOExpr), // TODO: patterns
+    Assign(String, Box<FeOExpr>), // TODO: patterns
     /// Conditional (e.g. `if cond { 1 } else { 2 }`)
-    Conditional(~FeOExpr, ~FeOExpr, ~FeOExpr),
+    Conditional(Box<FeOExpr>, Box<FeOExpr>, Box<FeOExpr>),
     /// For-loop (e.g. `for i in [1, 2, 3].iter() {}`)
-    ForLoop(~str, ~FeOExpr, Vec<FeOExpr>), // TODO: patterns
+    ForLoop(String, Box<FeOExpr>, Vec<FeOExpr>), // TODO: patterns
     /// While-loop (e.g. `while true {}`)
-    WhileLoop(~FeOExpr, Vec<FeOExpr>),
+    WhileLoop(Box<FeOExpr>, Vec<FeOExpr>),
     /// Function declaration (e.g. `fn f(x) { x * 2 }`)
-    FnDecl(~str, Vec<~str>, Vec<FeOExpr>), // TODO: patterns
+    FnDecl(String, Vec<String>, Vec<FeOExpr>), // TODO: patterns
     /// Class declaration (e.g. `class Cow: Animal + Object {}`)
-    ClassDecl(~str, Vec<~FeOExpr>, Vec<FeOExpr>),
+    ClassDecl(String, Vec<Box<FeOExpr>>, Vec<FeOExpr>),
     /// Block (e.g. `{ print(1); print(2) }`)
     Block(Vec<FeOExpr>),
     /// Nothing (for empty files)
     Nothing,
 }
 
-type ParserResult = Result<(FeOExpr, uint), (uint, ~str)>;
+type ParserResult = Result<(FeOExpr, uint), (uint, String)>;
 
 macro_rules! run_parser {
     ($str:ident, $i:ident, $f:ident) => {
@@ -62,7 +62,7 @@ macro_rules! run_parser {
 
 // TODO: make sure that block-based expressions don't require semicolons
 
-pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
+pub fn parse(str: &str) -> Result<FeOExpr, String> {
     return match stmts(str, 0) {
         Err((pos, msg)) => {
             Err(format!("pos {}: {}", pos, msg))
@@ -118,7 +118,7 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
                 },
                 // Anything but `}` at end of block
                 c if last_expr =>
-                    return Err((pos, format!("expected `\\}`, found `{}`", c))),
+                    return Err((pos, format!("expected `}}`, found `{}`", c))),
                 // Expression
                 _ => vec.push(run_parser!(str, pos, expr)),
             }
@@ -162,7 +162,7 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
                     break;
                 }
             }
-            expect(str, pos, ')', Call(~e, v))
+            expect(str, pos, ')', Call(box e, v))
         } else {
             Ok((e, pos))
         }
@@ -178,13 +178,13 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
             },
             // Number literal
             '0'..'9' => {
-                let mut buf = ~"";
+                let mut buf = String::new();
                 while pos < str.len()
                    && "0123456789.".contains_char(str[pos] as char) {
-                    buf.push_str(format!("{}", str[pos] as char));
+                    buf.push_str(format!("{}", str[pos] as char).as_slice());
                     pos += 1;
                 }
-                Ok((NumLiteral(from_str(buf).unwrap()), pos))
+                Ok((NumLiteral(from_str(buf.as_slice()).unwrap()), pos))
             },
             // Block expression
             '{' => {
@@ -211,12 +211,12 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
                             Block(_) | Conditional(..) => {},
                             _ =>
                                 return Err((pos,
-                                    ~"`else` should be followed by `if` or a block"))
+                                    "`else` should be followed by `if` or a block".to_string()))
                         }
-                        Ok((Conditional(~cond, ~yes, ~no), pos))
+                        Ok((Conditional(box cond, box yes, box no), pos))
                     },
                     Err(_) => { // No else-condition
-                        Ok((Conditional(~cond, ~yes, ~TupleLiteral(vec!())),
+                        Ok((Conditional(box cond, box yes, box TupleLiteral(vec!())),
                             pos))
                     },
                 }
@@ -227,12 +227,12 @@ pub fn parse(str: &str) -> Result<FeOExpr, ~str> {
                 let mut buf = format!("{}", str[pos] as char);
                 pos += 1;
                 while pos < str.len() && (str[pos] as char).is_alphanumeric() {
-                    buf.push_str(format!("{}", str[pos] as char));
+                    buf.push_str(format!("{}", str[pos] as char).as_slice());
                     pos += 1;
                 }
-                if buf == ~"false" {
+                if buf == "false".to_string() {
                     Ok((BoolLiteral(false), pos))
-                } else if buf == ~"true" {
+                } else if buf == "true".to_string() {
                     Ok((BoolLiteral(true), pos))
                 } else {
                     Ok((Identifier(buf), pos))
@@ -278,8 +278,8 @@ mod test {
     #[test]
     fn parse_identifier() {
         assert_eq!(parse("ifhello; world"),
-                  Ok(Block(vec!(Identifier(~"ifhello"),
-                                Identifier(~"world")))));
+                  Ok(Block(vec!(Identifier("ifhello".to_string()),
+                                Identifier("world".to_string())))));
     }
 
     #[test]
@@ -292,30 +292,30 @@ mod test {
     #[test]
     fn parse_if() {
         assert_eq!(parse("if 1 { 2 }"),
-                   Ok(Block(vec!(Conditional(~NumLiteral(1.0,), ~Block(vec!(
-                        NumLiteral(2.0))), ~TupleLiteral(vec!()))))));
+                   Ok(Block(vec!(Conditional(box NumLiteral(1.0,), box Block(vec!(
+                        NumLiteral(2.0))), box TupleLiteral(vec!()))))));
     }
 
     #[test]
     fn parse_if_else() {
         assert_eq!(parse("if 1 { 2 } else { 3 }"),
-                   Ok(Block(vec!(Conditional(~NumLiteral(1.0), ~Block(vec!(
-                        NumLiteral(2.0))), ~Block(vec!(NumLiteral(3.0))))))));
+                   Ok(Block(vec!(Conditional(box NumLiteral(1.0), box Block(vec!(
+                        NumLiteral(2.0))), box Block(vec!(NumLiteral(3.0))))))));
     }
 
     #[test]
     fn parse_if_else_if_else() {
         assert_eq!(parse("if 1 { 2 } else if 2 { 3 } else { 4 }"),
-                   Ok(Block(vec!(Conditional(~NumLiteral(1.0), ~Block(vec!(
-                        NumLiteral(2.0))), ~Conditional(~NumLiteral(2.0),
-                            ~Block(vec!(NumLiteral(3.0))),
-                            ~Block(vec!(NumLiteral(4.0)))))))));
+                   Ok(Block(vec!(Conditional(box NumLiteral(1.0), box Block(vec!(
+                        NumLiteral(2.0))), box Conditional(box NumLiteral(2.0),
+                            box Block(vec!(NumLiteral(3.0))),
+                            box Block(vec!(NumLiteral(4.0)))))))));
     }
 
     #[test]
     fn parse_if_else_expr() {
         assert_eq!(parse("if 1 { 2 } else 3"),
-            Err(~"pos 17: `else` should be followed by `if` or a block"));
+            Err("pos 17: `else` should be followed by `if` or a block".to_string()));
     }
 
     #[test]
@@ -327,9 +327,9 @@ mod test {
     #[test]
     fn parse_fn_call() {
         assert_eq!(parse("1.3 ( )"),
-                   Ok(Block(vec!(Call(~NumLiteral(1.3), vec!())))));
+                   Ok(Block(vec!(Call(box NumLiteral(1.3), vec!())))));
         assert_eq!(parse("f ( 3 , 4 )"),
-                   Ok(Block(vec!(Call(~Identifier(~"f"),
+                   Ok(Block(vec!(Call(box Identifier("f".to_string()),
                         vec!(NumLiteral(3.0), NumLiteral(4.0)))))));
     }
 }
