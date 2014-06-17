@@ -1,5 +1,5 @@
 #![crate_id = "feo"]
-#![crate_type = "lib"]
+#![crate_type = "bin"]
 
 #![feature(globs, macro_rules)]
 
@@ -36,5 +36,8 @@ mr_fluffles.purr(); // prints `purr maaaaaow purr`
 ~~~
 */
 
-pub mod parser;
-
+#[cfg(not(test))]
+fn main() {
+    fail!("The FeO compiler is a completely and utterly useless mess of code. Don’t even bother \
+        considering the possibility of maybe trying to attempt to use it.");
+}

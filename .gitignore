@@ -1,3 +1,4 @@
-libfeo-*.rlib
-libfeo-*.so
+*.rlib
+*.so
 doc/
+target/
